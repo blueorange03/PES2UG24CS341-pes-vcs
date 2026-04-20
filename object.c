@@ -121,11 +121,15 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     free(object_buf);
     return 0;
 }
-
-    free(object_buf);
-    return 0;
-}
-
+char hex[HASH_HEX_SIZE + 1];
+char shard_dir[512];
+    
+hash_to_hex(id_out, hex);
+snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
+    
+mkdir(shard_dir, 0755);
+free(object_buf);
+return 0;
 // Read an object from the store.
 //
 // Steps:
