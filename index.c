@@ -1,4 +1,4 @@
-// index.c — Staging area implementation
+// index.c \E2\80\94 Staging area implementation
 //
 // Text format of .pes/index (one entry per line, sorted by path):
 //
@@ -19,12 +19,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 
-// ─── PROVIDED ────────────────────────────────────────────────────────────────
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
+static int compare_index_entries(const void *a, const void *b) {
+    return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
+}
+
+// \E2\94\80\E2\94\80\E2\94\80 PROVIDED \E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80
 
 // Find an index entry by path (linear scan).
 IndexEntry* index_find(Index *index, const char *path) {
@@ -125,7 +133,7 @@ int index_status(const Index *index) {
     return 0;
 }
 
-// ─── TODO: Implement these ───────────────────────────────────────────────────
+// \E2\94\80\E2\94\80\E2\94\80 TODO: Implement these \E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80\E2\94\80
 
 // Load the index from .pes/index.
 //
@@ -159,7 +167,6 @@ int index_load(Index *index) {
         }
 
         entry = &index->entries[index->count];
-
         if (sscanf(line, "%o %64s %llu %u %511[^\n]",
                    &entry->mode, hex, &mtime, &size, entry->path) != 5) {
             fclose(f);
@@ -173,7 +180,6 @@ int index_load(Index *index) {
 
         entry->mtime_sec = (uint64_t)mtime;
         entry->size = size;
-
         index->count++;
     }
 
@@ -192,10 +198,54 @@ int index_load(Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_save(const Index *index) {
-    // TODO: Implement atomic index saving
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    FILE *f = NULL;
+    Index *sorted = NULL;
+    char temp_path[512];
+    int rc = -1;
+
+    if (!index) return -1;
+
+    sorted = malloc(sizeof(Index));
+    if (!sorted) return -1;
+
+    *sorted = *index;
+    qsort(sorted->entries, sorted->count, sizeof(IndexEntry), compare_index_entries);
+    snprintf(temp_path, sizeof(temp_path), "%s.tmp", INDEX_FILE);
+
+    f = fopen(temp_path, "w");
+    if (!f) goto cleanup;
+
+    for (int i = 0; i < sorted->count; i++) {
+        char hex[HASH_HEX_SIZE + 1];
+
+        hash_to_hex(&sorted->entries[i].hash, hex);
+        if (fprintf(f, "%o %s %llu %u %s\n",
+                    sorted->entries[i].mode,
+                    hex,
+                    (unsigned long long)sorted->entries[i].mtime_sec,
+                    sorted->entries[i].size,
+                    sorted->entries[i].path) < 0) {
+            goto cleanup;
+        }
+    }
+
+    if (fflush(f) != 0) goto cleanup;
+    if (fsync(fileno(f)) != 0) goto cleanup;
+    if (fclose(f) != 0) {
+        f = NULL;
+        goto cleanup;
+    }
+    f = NULL;
+
+    if (rename(temp_path, INDEX_FILE) != 0) goto cleanup;
+
+    rc = 0;
+
+cleanup:
+    if (f) fclose(f);
+    if (rc != 0) unlink(temp_path);
+    free(sorted);
+    return rc;
 }
 
 // Stage a file for the next commit.
@@ -208,8 +258,50 @@ int index_save(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+    FILE *f = NULL;
+    struct stat st;
+    void *data = NULL;
+    size_t read_size;
+    ObjectID blob_id;
+    IndexEntry *entry;
+    int rc = -1;
+
+    if (!index || !path) return -1;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return -1;
+
+    f = fopen(path, "rb");
+    if (!f) return -1;
+
+    data = malloc((size_t)st.st_size == 0 ? 1 : (size_t)st.st_size);
+    if (!data) goto cleanup;
+
+    read_size = (size_t)st.st_size;
+    if (read_size > 0 && fread(data, 1, read_size, f) != read_size) goto cleanup;
+    if (fclose(f) != 0) {
+        f = NULL;
+        goto cleanup;
+    }
+    f = NULL;
+
+    if (object_write(OBJ_BLOB, data, read_size, &blob_id) != 0) goto cleanup;
+
+    entry = index_find(index, path);
+    if (!entry) {
+        if (index->count >= MAX_INDEX_ENTRIES) goto cleanup;
+        entry = &index->entries[index->count++];
+    }
+
+    entry->mode = (st.st_mode & S_IXUSR) ? 0100755 : 0100644;
+    entry->hash = blob_id;
+    entry->mtime_sec = (uint64_t)st.st_mtime;
+    entry->size = (uint32_t)st.st_size;
+    if (snprintf(entry->path, sizeof(entry->path), "%s", path) >= (int)sizeof(entry->path)) goto cleanup;
+    if (index_save(index) != 0) goto cleanup;
+
+    rc = 0;
+
+cleanup:
+    free(data);
+    if (f) fclose(f);
+    return rc;
 }
