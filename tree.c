@@ -140,9 +140,14 @@ int tree_from_index(ObjectID *id_out) {
         return -1;
     }
 
+    if (index->count == 0) {
+        free(index);
+        return -1;
+    }
+
     free(index);
     return -1;
-} 
+}
     (void)id_out;
     return -1;
 }
