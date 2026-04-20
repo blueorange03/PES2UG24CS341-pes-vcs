@@ -129,18 +129,36 @@ snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
     
 mkdir(shard_dir, 0755);
 
-char final_path[512];
-object_path(id_out, final_path, sizeof(final_path));
+char tmp_path[512];
+snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", final_path);
 
-FILE *f = fopen(final_path, "wb");
-if (!f) {
+int fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+if (fd < 0) {
     free(object_buf);
     return -1;
 }
 
-fwrite(object_buf, 1, object_len, f);
-fclose(f);
+if (write_all(fd, object_buf, object_len) != 0) {
+    close(fd);
+    unlink(tmp_path);
+    free(object_buf);
+    return -1;
+}
 
+if (fsync(fd) != 0) {
+    close(fd);
+    unlink(tmp_path);
+    free(object_buf);
+    return -1;
+}
+
+close(fd);
+
+if (rename(tmp_path, final_path) != 0) {
+    unlink(tmp_path);
+    free(object_buf);
+    return -1;
+}
 free(object_buf);
 return 0;
 // Read an object from the store.
