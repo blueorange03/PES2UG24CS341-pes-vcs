@@ -93,10 +93,32 @@ int object_exists(const ObjectID *id) {
 
 //
 // Returns 0 on success, -1 on error.
+// ONLY object_write changed, rest SAME
+
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
-    // TODO: Implement
-    (void)type; (void)data; (void)len; (void)id_out;
-    return -1;
+    const char *type_name = object_type_name(type);
+    char header[64];
+    size_t object_len;
+    unsigned char *object_buf;
+
+    if (!type_name || !id_out) return -1;
+
+    int header_len = snprintf(header, sizeof(header), "%s %zu", type_name, len);
+    if (header_len < 0) return -1;
+
+    object_len = header_len + 1 + len;
+
+    object_buf = malloc(object_len);
+    if (!object_buf) return -1;
+
+    memcpy(object_buf, header, header_len);
+    object_buf[header_len] = '\0';
+    if (len > 0) memcpy(object_buf + header_len + 1, data, len);
+
+    compute_hash(object_buf, object_len, id_out);
+
+    free(object_buf);
+    return 0;
 }
 
 // Read an object from the store.
