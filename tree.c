@@ -145,8 +145,12 @@ int tree_from_index(ObjectID *id_out) {
         return -1;
     }
 
+    int rc;
+    
+    rc = write_tree_level(index, "", id_out);
+    
     free(index);
-    return -1;
+    return rc;
 }
     (void)id_out;
     return -1;
