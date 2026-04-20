@@ -135,16 +135,49 @@ int index_status(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
+    FILE *f;
+    char line[1024];
+
     if (!index) return -1;
     index->count = 0;
-    return 0;
-}
 
-int index_save(const Index *index) {
-    return 0;
-}
+    f = fopen(INDEX_FILE, "r");
+    if (!f) {
+        if (errno == ENOENT) return 0;
+        return -1;
+    }
 
-int index_add(Index *index, const char *path) {
+    while (fgets(line, sizeof(line), f)) {
+        IndexEntry *entry;
+        char hex[HASH_HEX_SIZE + 1];
+        unsigned long long mtime;
+        unsigned int size;
+
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            fclose(f);
+            return -1;
+        }
+
+        entry = &index->entries[index->count];
+
+        if (sscanf(line, "%o %64s %llu %u %511[^\n]",
+                   &entry->mode, hex, &mtime, &size, entry->path) != 5) {
+            fclose(f);
+            return -1;
+        }
+
+        if (hex_to_hash(hex, &entry->hash) != 0) {
+            fclose(f);
+            return -1;
+        }
+
+        entry->mtime_sec = (uint64_t)mtime;
+        entry->size = size;
+
+        index->count++;
+    }
+
+    fclose(f);
     return 0;
 }
 
